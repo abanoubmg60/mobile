@@ -232,6 +232,8 @@ sealed class const BoardPrefs._() with _$BoardPrefs implements Serializable {
       drawShape: DrawShapeOptions(enable: enableShapeDrawings, newShapeColor: shapeColor.color),
       enableDrops: variant == Variant.crazyhouse,
       canPromoteToKing: variant == Variant.antichess,
+      enablePremoves: premoves,
+      multiplePremoves: premoves,
     );
   }
 

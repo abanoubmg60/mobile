@@ -84,21 +84,21 @@ class const _ErrorWidget({required final String errorMessage}) extends Stateless
 
 /// Executes a pending premove on [ctrl] if it is legal in [position], calling [onMove] via
 /// [scheduleMicrotask] to avoid modifying Riverpod providers inside widget lifecycle callbacks.
-/// Clears the premove if it is illegal.
+/// Clears the entire premove queue if the next premove is illegal.
 void tryExecutePremove(ChessboardController ctrl, Position position, void Function(Move) onMove) {
-  final premove = ctrl.premove;
+  final premove = ctrl.premoveQueue.firstOrNull ?? ctrl.premove;
   if (premove == null) return;
   if (position.isLegal(premove)) {
     if (premove is NormalMove && isPromotionPawnMove(position, premove)) {
-      ctrl.premove = null;
+      ctrl.removeFirstPremove();
       ctrl.pendingPromotion = premove;
     } else {
-      ctrl.premove = null;
+      ctrl.removeFirstPremove();
       scheduleMicrotask(() => onMove(premove));
     }
   } else {
-    // Premove became illegal (e.g. after a takeback) — clear it.
-    ctrl.premove = null;
+    // Premove became illegal (e.g. after a takeback or opponent move) — flush the queue.
+    ctrl.clearPremoves();
   }
 }
 

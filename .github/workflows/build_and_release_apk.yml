@@ -1,0 +1,126 @@
+name: Build & Release Android APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v0.28.4 or v0.28.4-custom)'
+        required: true
+        default: 'v0.28.4'
+        type: string
+      release_name:
+        description: 'Release Title'
+        required: false
+        default: 'Lichess Mobile Release'
+        type: string
+      draft:
+        description: 'Create as a draft release?'
+        required: true
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as pre-release?'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: pubspec.yaml
+          cache: true
+
+      - name: Verify Environment
+        run: |
+          flutter --version
+          java -version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run code generation
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      # If secrets are provided, configure the signing keystore
+      - name: Configure Keystore (Optional)
+        if: ${{ env.PLAY_STORE_UPLOAD_KEY != '' }}
+        run: |
+          echo "$PLAY_STORE_UPLOAD_KEY" | base64 --decode > android/app/upload-keystore.jks
+          echo "storeFile=upload-keystore.jks" >> android/key.properties
+          echo "keyAlias=$KEYSTORE_KEY_ALIAS" >> android/key.properties
+          echo "storePassword=$KEYSTORE_STORE_PASSWORD" >> android/key.properties
+          echo "keyPassword=$KEYSTORE_KEY_PASSWORD" >> android/key.properties
+        env:
+          PLAY_STORE_UPLOAD_KEY: ${{ secrets.PLAY_STORE_UPLOAD_KEY }}
+          KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
+          KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+          KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
+
+      - name: Build Universal Release APK
+        run: flutter build apk --release
+
+      - name: Build Split per ABI Release APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Organize & Rename APKs
+        run: |
+          mkdir -p release-apks
+          cp build/app/outputs/flutter-apk/app-release.apk release-apks/lichess-mobile-universal.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release-apks/lichess-mobile-arm64-v8a.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release-apks/lichess-mobile-armeabi-v7a.apk
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk release-apks/lichess-mobile-x86_64.apk
+          ls -lh release-apks/
+
+      - name: Upload APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lichess-mobile-apks
+          path: release-apks/*
+          retention-days: 14
+
+      - name: Determine Release Tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+            echo "title=${{ github.event.inputs.release_name || github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "title=Lichess Mobile $TAG" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.title }}
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          generate_release_notes: true
+          files: |
+            release-apks/lichess-mobile-universal.apk
+            release-apks/lichess-mobile-arm64-v8a.apk
+            release-apks/lichess-mobile-armeabi-v7a.apk
+            release-apks/lichess-mobile-x86_64.apk

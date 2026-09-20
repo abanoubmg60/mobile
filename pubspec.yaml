@@ -108,6 +108,8 @@ dev_dependencies:
 dependency_overrides:
   # dartchess is pinned to the Zobrist hashing the opening book keys on (0.14.0, unreleased).
   # Remove once dartchess 0.14.0 is on pub.dev and the constraint above is bumped.
+  chessground:
+    path: packages/chessground
   dartchess:
     git:
       url: https://github.com/lichess-org/dartchess.git

@@ -31,6 +31,7 @@ import 'package:lichess_mobile/src/view/game/game_player.dart';
 import 'package:lichess_mobile/src/view/game/game_result_dialog.dart';
 import 'package:lichess_mobile/src/view/game/game_screen_providers.dart';
 import 'package:lichess_mobile/src/view/game/game_settings.dart';
+import 'package:lichess_mobile/src/view/game/live_evaluation_header.dart';
 import 'package:lichess_mobile/src/view/tournament/tournament_screen.dart';
 import 'package:lichess_mobile/src/widgets/adaptive_action_sheet.dart';
 import 'package:lichess_mobile/src/widgets/board.dart';
@@ -435,6 +436,7 @@ class _PlayableGameBoardState() extends ConsumerState<_PlayableGameBoard> {
             enablePremoves: shell.canPremove && boardPrefs.premoves,
           ),
           orientation: orientation,
+          boardHeaderWidget: LiveEvaluationHeader(gameId: widget.gameId, orientation: orientation),
           topTable: _GamePlayerTable(
             gameId: widget.gameId,
             side: topSide,

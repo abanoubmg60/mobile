@@ -7,15 +7,23 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release Tag (e.g. v0.28.4 or v0.28.4-custom)'
+        description: 'Release Tag (e.g. v0.28.4-premoves)'
         required: true
-        default: 'v0.28.4'
+        default: 'v0.28.4-premoves'
         type: string
       release_name:
         description: 'Release Title'
         required: false
-        default: 'Lichess Mobile Release'
+        default: 'Lichess Mobile (Multi-Premoves & Live Eval)'
         type: string
+      target_arch:
+        description: 'Target Architecture (arm64-v8a = ~45MB & 4-5m build, universal = ~160MB)'
+        required: true
+        default: 'arm64-v8a'
+        type: choice
+        options:
+          - 'arm64-v8a'
+          - 'universal'
       draft:
         description: 'Create as a draft release?'
         required: true
@@ -45,6 +53,9 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -62,40 +73,41 @@ jobs:
       - name: Run code generation
         run: dart run build_runner build --delete-conflicting-outputs
 
-      # If secrets are provided, configure the signing keystore
-      - name: Configure Keystore (Optional)
-        if: ${{ env.PLAY_STORE_UPLOAD_KEY != '' }}
+      # Ensure keystore permissions and verify key.properties exist
+      - name: Verify Release Keystore
         run: |
-          echo "$PLAY_STORE_UPLOAD_KEY" | base64 --decode > android/app/upload-keystore.jks
-          echo "storeFile=upload-keystore.jks" >> android/key.properties
-          echo "keyAlias=$KEYSTORE_KEY_ALIAS" >> android/key.properties
-          echo "storePassword=$KEYSTORE_STORE_PASSWORD" >> android/key.properties
-          echo "keyPassword=$KEYSTORE_KEY_PASSWORD" >> android/key.properties
-        env:
-          PLAY_STORE_UPLOAD_KEY: ${{ secrets.PLAY_STORE_UPLOAD_KEY }}
-          KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
-          KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
-          KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
+          ls -la android/app/upload-keystore.jks android/key.properties
 
       - name: Build Release APK
         run: |
-          flutter build apk --release \
-            --dart-define=cronetHttpNoPlay=true \
-            --dart-define=LICHESS_HOST=lichess.org \
-            --dart-define=LICHESS_WS_HOST=socket.lichess.org \
-            --dart-define=LICHESS_WS_SECRET=wG1OLhUR3CSXdDybqrtIW227QGrtiM3d
-
-      - name: Organize & Rename APK
-        run: |
+          TARGET_ARCH="${{ github.event.inputs.target_arch || 'arm64-v8a' }}"
           mkdir -p release-apks
-          cp build/app/outputs/flutter-apk/app-release.apk release-apks/lichess-mobile.apk
+          if [ "$TARGET_ARCH" = "universal" ]; then
+            echo "Building Universal APK..."
+            flutter build apk --release \
+              --dart-define=cronetHttpNoPlay=true \
+              --dart-define=LICHESS_HOST=lichess.org \
+              --dart-define=LICHESS_WS_HOST=socket.lichess.org \
+              --dart-define=LICHESS_WS_SECRET=wG1OLhUR3CSXdDybqrtIW227QGrtiM3d
+            cp build/app/outputs/flutter-apk/app-release.apk release-apks/lichess-mobile-universal.apk
+          else
+            echo "Building arm64-v8a Optimized APK..."
+            flutter build apk --release \
+              --target-platform=android-arm64 \
+              -PtargetAbi=arm64-v8a \
+              --dart-define=cronetHttpNoPlay=true \
+              --dart-define=LICHESS_HOST=lichess.org \
+              --dart-define=LICHESS_WS_HOST=socket.lichess.org \
+              --dart-define=LICHESS_WS_SECRET=wG1OLhUR3CSXdDybqrtIW227QGrtiM3d
+            cp build/app/outputs/flutter-apk/app-release.apk release-apks/lichess-mobile-arm64-v8a.apk
+          fi
           ls -lh release-apks/
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: lichess-mobile-apk
-          path: release-apks/lichess-mobile.apk
+          path: release-apks/*
           retention-days: 14
 
       - name: Determine Release Tag
@@ -118,5 +130,4 @@ jobs:
           draft: ${{ github.event.inputs.draft || false }}
           prerelease: ${{ github.event.inputs.prerelease || false }}
           generate_release_notes: true
-          files: release-apks/lichess-mobile.apk
-
+          files: release-apks/*

@@ -41,8 +41,13 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        val targetAbi = project.findProperty("targetAbi") as String?
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+            if (targetAbi != null && targetAbi.isNotEmpty()) {
+                abiFilters += listOf(targetAbi)
+            } else {
+                abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+            }
         }
     }
 

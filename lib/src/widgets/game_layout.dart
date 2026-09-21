@@ -67,6 +67,7 @@ class GameLayout extends ConsumerStatefulWidget {
     this.errorMessage,
     this.boardKey,
     this.zenMode = false,
+    this.boardHeaderWidget,
     this.userActionsBar,
     this.explosionSquares,
     this.isReplaying = false,
@@ -99,7 +100,8 @@ class GameLayout extends ConsumerStatefulWidget {
       userActionsBar = null,
       explosionSquares = null,
       isReplaying = false,
-      onPremove = null;
+      onPremove = null,
+      boardHeaderWidget = null;
 
   /// Board parameters for the owned-controller path: [GameLayout] creates and
   /// drives the controller from these, updating it in [didUpdateWidget].
@@ -166,6 +168,9 @@ class GameLayout extends ConsumerStatefulWidget {
 
   /// Optional widget that will be displayed on top of the board.
   final Widget? boardOverlay;
+
+  /// Optional widget displayed directly above the board (e.g. live evaluation bar).
+  final Widget? boardHeaderWidget;
 
   /// If true, the move list will be hidden
   final bool zenMode;
@@ -540,6 +545,13 @@ class _GameLayoutState() extends ConsumerState<GameLayout> {
                   child: topTable(boardSize: effectiveBoardSize),
                 ),
               ),
+              if (widget.boardHeaderWidget != null)
+                Padding(
+                  padding: isTablet
+                      ? const EdgeInsets.symmetric(horizontal: kTabletBoardTableSidePadding)
+                      : const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: widget.boardHeaderWidget,
+                ),
               Padding(
                 padding: isTablet
                     ? const EdgeInsets.symmetric(horizontal: kTabletBoardTableSidePadding)

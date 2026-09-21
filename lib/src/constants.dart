@@ -1,16 +1,16 @@
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
-const kLichessHost = String.fromEnvironment('LICHESS_HOST', defaultValue: 'lichess.dev');
+const kLichessHost = String.fromEnvironment('LICHESS_HOST', defaultValue: 'lichess.org');
 
 const kLichessWSHost = String.fromEnvironment(
   'LICHESS_WS_HOST',
-  defaultValue: 'socket.lichess.dev',
+  defaultValue: 'socket.lichess.org',
 );
 
 const kLichessWSSecret = String.fromEnvironment(
   'LICHESS_WS_SECRET',
-  defaultValue: 'somethingElseInProd',
+  defaultValue: 'wG1OLhUR3CSXdDybqrtIW227QGrtiM3d',
 );
 
 const kLichessCDNHost = String.fromEnvironment(

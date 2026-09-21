@@ -78,7 +78,12 @@ jobs:
           KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
 
       - name: Build Release APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release \
+            --dart-define=cronetHttpNoPlay=true \
+            --dart-define=LICHESS_HOST=lichess.org \
+            --dart-define=LICHESS_WS_HOST=socket.lichess.org \
+            --dart-define=LICHESS_WS_SECRET=wG1OLhUR3CSXdDybqrtIW227QGrtiM3d
 
       - name: Organize & Rename APK
         run: |

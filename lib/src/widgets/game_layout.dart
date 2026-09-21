@@ -458,16 +458,23 @@ class _GameLayoutState() extends ConsumerState<GameLayout> {
               },
               mainAxisSize: MainAxisSize.max,
               children: [
-                BoardWidget(
-                  size: boardSize,
-                  orientation: widget.orientation,
-                  controller: _controller!,
-                  onMove: rawOnMove,
-                  shapes: shapes,
-                  settings: settings,
-                  boardKey: widget.boardKey,
-                  boardOverlay: widget.boardOverlay,
-                  error: widget.errorMessage,
+                Column(
+                  mainAxisSize: .min,
+                  children: [
+                    if (widget.boardHeaderWidget != null)
+                      SizedBox(width: boardSize, child: widget.boardHeaderWidget),
+                    BoardWidget(
+                      size: boardSize,
+                      orientation: widget.orientation,
+                      controller: _controller!,
+                      onMove: rawOnMove,
+                      shapes: shapes,
+                      settings: settings,
+                      boardKey: widget.boardKey,
+                      boardOverlay: widget.boardOverlay,
+                      error: widget.errorMessage,
+                    ),
+                  ],
                 ),
                 const SizedBox(width: 16.0),
                 Expanded(
@@ -514,7 +521,8 @@ class _GameLayoutState() extends ConsumerState<GameLayout> {
               pocketsPadding;
 
           //Reserve vertical space for the top and bottom tables and the user actions bar if present.
-          final maxAllowedBoardSize = maxHeight - 180.0;
+          final maxAllowedBoardSize =
+              maxHeight - (widget.boardHeaderWidget != null ? 220.0 : 180.0);
           if (effectiveBoardSize > maxAllowedBoardSize) {
             effectiveBoardSize = maxAllowedBoardSize;
           }
@@ -550,7 +558,7 @@ class _GameLayoutState() extends ConsumerState<GameLayout> {
                   padding: isTablet
                       ? const EdgeInsets.symmetric(horizontal: kTabletBoardTableSidePadding)
                       : const EdgeInsets.symmetric(horizontal: 4.0),
-                  child: widget.boardHeaderWidget,
+                  child: SizedBox(width: effectiveBoardSize, child: widget.boardHeaderWidget),
                 ),
               Padding(
                 padding: isTablet

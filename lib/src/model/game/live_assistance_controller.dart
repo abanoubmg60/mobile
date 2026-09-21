@@ -10,7 +10,6 @@ import 'package:lichess_mobile/src/model/common/id.dart';
 import 'package:lichess_mobile/src/model/engine/evaluation_context.dart';
 import 'package:lichess_mobile/src/model/engine/position_evaluator.dart';
 import 'package:lichess_mobile/src/model/engine/work.dart';
-import 'package:lichess_mobile/src/model/game/game_controller.dart';
 
 @immutable
 class const LiveMoveSuggestion({
@@ -25,14 +24,14 @@ class const LiveAssistanceState({
   final bool isComputing = false,
   final double? whiteWinningChances = 0.0,
   final String? evalString,
-  final List<LiveMoveSuggestion> suggestions = const [],
+  final IList<LiveMoveSuggestion> suggestions = const IListConst([]),
 }) {
   LiveAssistanceState copyWith({
     bool? enabled,
     bool? isComputing,
     double? whiteWinningChances,
     String? evalString,
-    List<LiveMoveSuggestion>? suggestions,
+    IList<LiveMoveSuggestion>? suggestions,
   }) {
     return LiveAssistanceState(
       enabled: enabled ?? this.enabled,
@@ -45,11 +44,10 @@ class const LiveAssistanceState({
 }
 
 /// Global toggle to enable/disable live assistance.
-final liveAssistanceEnabledProvider =
-    NotifierProvider<LiveAssistanceEnabledNotifier, bool>(
-      LiveAssistanceEnabledNotifier.new,
-      name: 'LiveAssistanceEnabledProvider',
-    );
+final liveAssistanceEnabledProvider = NotifierProvider<LiveAssistanceEnabledNotifier, bool>(
+  LiveAssistanceEnabledNotifier.new,
+  name: 'LiveAssistanceEnabledProvider',
+);
 
 class LiveAssistanceEnabledNotifier() extends Notifier<bool> {
   @override
@@ -60,24 +58,28 @@ class LiveAssistanceEnabledNotifier() extends Notifier<bool> {
 
 /// Formats a SAN string with clean unicode piece symbols.
 String formatSanWithPieceEmoji(Position position, Move move) {
-  final (_, san) = position.makeSan(move);
-  if (san.isEmpty) return san;
-  final first = san[0];
-  switch (first) {
-    case 'N':
-      return '♘${san.substring(1)}';
-    case 'B':
-      return '♗${san.substring(1)}';
-    case 'R':
-      return '♖${san.substring(1)}';
-    case 'Q':
-      return '♕${san.substring(1)}';
-    case 'K':
-      return '♔${san.substring(1)}';
-    case 'O':
-      return san;
-    default:
-      return '♟$san';
+  try {
+    final (_, san) = position.makeSan(move);
+    if (san.isEmpty) return san;
+    final first = san[0];
+    switch (first) {
+      case 'N':
+        return '♞${san.substring(1)}';
+      case 'B':
+        return '♗${san.substring(1)}';
+      case 'R':
+        return '♖${san.substring(1)}';
+      case 'Q':
+        return '♕${san.substring(1)}';
+      case 'K':
+        return '♔${san.substring(1)}';
+      case 'O':
+        return san;
+      default:
+        return '♟$san';
+    }
+  } catch (_) {
+    return move.uci;
   }
 }
 
@@ -89,95 +91,109 @@ final liveAssistanceProvider = NotifierProvider.autoDispose
 
 class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssistanceState> {
   String? _lastFen;
-  ProviderSubscription<EngineEvaluationState>? _evalSubscription;
+  StreamSubscription<EvalResult>? _evalSubscription;
+  EvaluationContext? _evalContext;
+  LiveAssistanceState _currentState = const LiveAssistanceState();
 
   @override
   LiveAssistanceState build() {
     final enabled = ref.watch(liveAssistanceEnabledProvider);
+    _currentState = _currentState.copyWith(enabled: enabled);
 
-    // Watch game state to trigger evaluations on position changes
-    final gameState = ref.watch(gameControllerProvider(gameId)).value;
+    ref.onDispose(() {
+      _evalSubscription?.cancel();
+    });
 
-    if (!enabled || gameState == null || !gameState.game.playable) {
-      return LiveAssistanceState(enabled: enabled);
-    }
-
-    final currentPosition = gameState.currentPosition;
-    final currentFen = currentPosition.fen;
-
-    if (_lastFen != currentFen) {
-      _lastFen = currentFen;
-      // Schedule evaluation on next microtask to avoid side-effects during build
-      Future.microtask(() => _evaluatePosition(gameState.game.meta.variant, currentPosition));
-    }
-
-    return state;
+    return _currentState;
   }
 
   void toggleEnabled() {
     ref.read(liveAssistanceEnabledProvider.notifier).toggle();
   }
 
-  void _evaluatePosition(Variant variant, Position position) {
-    if (!state.enabled) return;
+  void onPositionChanged({
+    required Variant variant,
+    required Position initialPosition,
+    required Position currentPosition,
+  }) {
+    if (!_currentState.enabled) return;
 
-    final evalContext = EvaluationContext(
-      id: StringId(gameId.value),
-      variant: variant,
-      initialPosition: position,
-    );
+    final currentFen = currentPosition.fen;
+    if (_lastFen == currentFen) return;
+    _lastFen = currentFen;
 
-    // Cancel existing evaluator subscription
-    _evalSubscription?.close();
+    try {
+      _evalContext ??= EvaluationContext(
+        id: StringId('live_assist_${gameId.value}'),
+        variant: variant,
+        initialPosition: initialPosition,
+      );
 
-    // Listen to engine output
-    _evalSubscription = ref.listen(
-      positionEvaluatorProvider(evalContext),
-      (EngineEvaluationState? prev, EngineEvaluationState next) {
-        final ClientEval? eval = next.eval;
-        if (eval == null) return;
+      final evaluator = ref.read(positionEvaluatorProvider(_evalContext!).notifier);
 
-        final pvs = eval.pvs;
-        final suggestions = <LiveMoveSuggestion>[];
-
-        for (final pv in pvs.take(3)) {
-          final uci = pv.moves.firstOrNull;
-          if (uci != null) {
-            final move = Move.parse(uci);
-            if (move != null) {
-              final san = formatSanWithPieceEmoji(position, move);
-              suggestions.add(
-                LiveMoveSuggestion(
-                  san: san,
-                  evalString: pv.evalString,
-                  winningChances: pv.winningChances(Side.white),
-                ),
-              );
-            }
-          }
-        }
-
-        state = state.copyWith(
-          isComputing: next.isComputing,
-          whiteWinningChances: eval.winningChances(Side.white),
-          evalString: eval.evalString,
-          suggestions: suggestions,
-        );
-      },
-    );
-
-    final evaluator = ref.read(positionEvaluatorProvider(evalContext).notifier);
-    evaluator.evaluate(
-      EvalWork(
-        id: StringId(gameId.value),
+      final work = EvalWork(
+        id: StringId('live_assist_${gameId.value}'),
         variant: variant,
         threads: 1,
         searchTime: const Duration(milliseconds: 300),
         multiPv: 3,
         threatMode: false,
-        initialPosition: position,
+        initialPosition: currentPosition,
         steps: const IListConst([]),
-      ),
-    );
+      );
+
+      _evalSubscription?.cancel();
+      _currentState = _currentState.copyWith(isComputing: true);
+      state = _currentState;
+
+      _evalSubscription = evaluator
+          .evaluate(work)
+          ?.listen(
+            (event) {
+              final (_, eval) = event;
+              _handleEvalResult(currentPosition, eval);
+            },
+            onError: (Object _) {
+              _currentState = _currentState.copyWith(isComputing: false);
+              state = _currentState;
+            },
+          );
+    } catch (_) {
+      _currentState = _currentState.copyWith(isComputing: false);
+      state = _currentState;
+    }
+  }
+
+  void _handleEvalResult(Position position, LocalEval eval) {
+    try {
+      final suggestions = <LiveMoveSuggestion>[];
+      for (final pv in eval.pvs.take(3)) {
+        final uci = pv.moves.firstOrNull;
+        if (uci != null) {
+          final move = Move.parse(uci);
+          if (move != null) {
+            final san = formatSanWithPieceEmoji(position, move);
+            suggestions.add(
+              LiveMoveSuggestion(
+                san: san,
+                evalString: pv.evalString,
+                winningChances: pv.winningChances(Side.white),
+              ),
+            );
+          }
+        }
+      }
+
+      _currentState = _currentState.copyWith(
+        isComputing: false,
+        whiteWinningChances: eval.winningChances(Side.white),
+        evalString: eval.evalString,
+        suggestions: suggestions.toIList(),
+      );
+      state = _currentState;
+    } catch (_) {
+      _currentState = _currentState.copyWith(isComputing: false);
+      state = _currentState;
+    }
   }
 }

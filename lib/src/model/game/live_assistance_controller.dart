@@ -10,6 +10,7 @@ import 'package:lichess_mobile/src/model/common/id.dart';
 import 'package:lichess_mobile/src/model/engine/evaluation_context.dart';
 import 'package:lichess_mobile/src/model/engine/position_evaluator.dart';
 import 'package:lichess_mobile/src/model/engine/work.dart';
+import 'package:lichess_mobile/src/model/game/game_controller.dart';
 
 @immutable
 class const LiveMoveSuggestion({
@@ -91,7 +92,9 @@ final liveAssistanceProvider = NotifierProvider.autoDispose
 
 class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssistanceState> {
   String? _lastFen;
-  StreamSubscription<EvalResult>? _evalSubscription;
+  Position? _evaluatedPosition;
+  ProviderSubscription<EngineEvaluationState>? _evaluatorSub;
+  StreamSubscription<EvalResult>? _streamSub;
   EvaluationContext? _evalContext;
   LiveAssistanceState _currentState = const LiveAssistanceState();
 
@@ -101,8 +104,30 @@ class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssis
     _currentState = _currentState.copyWith(enabled: enabled);
 
     ref.onDispose(() {
-      _evalSubscription?.cancel();
+      _streamSub?.cancel();
+      _evaluatorSub?.close();
     });
+
+    final gameState = ref.watch(gameControllerProvider(gameId)).value;
+    if (enabled && gameState != null && gameState.game.playable) {
+      final currentPosition = gameState.currentPosition;
+      final currentFen = currentPosition.fen;
+
+      if (_lastFen != currentFen) {
+        _lastFen = currentFen;
+        _evaluatedPosition = currentPosition;
+
+        Future.microtask(() {
+          if (ref.mounted) {
+            _startEvaluation(
+              variant: gameState.game.meta.variant,
+              initialPosition: gameState.game.initialPosition,
+              currentPosition: currentPosition,
+            );
+          }
+        });
+      }
+    }
 
     return _currentState;
   }
@@ -116,37 +141,59 @@ class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssis
     required Position initialPosition,
     required Position currentPosition,
   }) {
-    if (!_currentState.enabled) return;
+    _startEvaluation(
+      variant: variant,
+      initialPosition: initialPosition,
+      currentPosition: currentPosition,
+    );
+  }
 
-    final currentFen = currentPosition.fen;
-    if (_lastFen == currentFen) return;
-    _lastFen = currentFen;
+  void _startEvaluation({
+    required Variant variant,
+    required Position initialPosition,
+    required Position currentPosition,
+  }) {
+    if (!_currentState.enabled || !ref.mounted) return;
 
     try {
-      _evalContext ??= EvaluationContext(
+      final context = EvaluationContext(
         id: StringId('live_assist_${gameId.value}'),
         variant: variant,
         initialPosition: initialPosition,
       );
 
-      final evaluator = ref.read(positionEvaluatorProvider(_evalContext!).notifier);
+      _evaluatedPosition = currentPosition;
+
+      // Keep positionEvaluatorProvider alive via subscription
+      if (_evalContext != context || _evaluatorSub == null) {
+        _evaluatorSub?.close();
+        _evalContext = context;
+        _evaluatorSub = ref.listen(positionEvaluatorProvider(context), (prev, next) {
+          final eval = next.eval;
+          if (eval != null && _evaluatedPosition != null) {
+            _handleEvalResult(_evaluatedPosition!, eval);
+          }
+        });
+      }
+
+      final evaluator = ref.read(positionEvaluatorProvider(context).notifier);
 
       final work = EvalWork(
         id: StringId('live_assist_${gameId.value}'),
         variant: variant,
         threads: 1,
-        searchTime: const Duration(milliseconds: 300),
+        searchTime: const Duration(seconds: 3),
         multiPv: 3,
         threatMode: false,
         initialPosition: currentPosition,
         steps: const IListConst([]),
       );
 
-      _evalSubscription?.cancel();
+      _streamSub?.cancel();
       _currentState = _currentState.copyWith(isComputing: true);
       state = _currentState;
 
-      _evalSubscription = evaluator
+      _streamSub = evaluator
           .evaluate(work)
           ?.listen(
             (event) {
@@ -165,6 +212,7 @@ class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssis
   }
 
   void _handleEvalResult(Position position, LocalEval eval) {
+    if (!ref.mounted) return;
     try {
       final suggestions = <LiveMoveSuggestion>[];
       for (final pv in eval.pvs.take(3)) {
@@ -184,13 +232,15 @@ class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssis
         }
       }
 
-      _currentState = _currentState.copyWith(
-        isComputing: false,
-        whiteWinningChances: eval.winningChances(Side.white),
-        evalString: eval.evalString,
-        suggestions: suggestions.toIList(),
-      );
-      state = _currentState;
+      if (suggestions.isNotEmpty) {
+        _currentState = _currentState.copyWith(
+          isComputing: false,
+          whiteWinningChances: eval.winningChances(Side.white),
+          evalString: eval.evalString,
+          suggestions: suggestions.toIList(),
+        );
+        state = _currentState;
+      }
     } catch (_) {
       _currentState = _currentState.copyWith(isComputing: false);
       state = _currentState;

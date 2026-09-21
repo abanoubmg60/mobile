@@ -2,7 +2,6 @@ import 'package:dartchess/dartchess.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lichess_mobile/src/model/common/id.dart';
-import 'package:lichess_mobile/src/model/game/game_controller.dart';
 import 'package:lichess_mobile/src/model/game/live_assistance_controller.dart';
 import 'package:lichess_mobile/src/styles/styles.dart';
 
@@ -14,36 +13,6 @@ class const LiveEvaluationHeader({
 }) extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Listen for live moves in the game
-    ref.listen(gameControllerProvider(gameId), (_, next) {
-      final state = next.value;
-      if (state != null && state.game.playable) {
-        ref
-            .read(liveAssistanceProvider(gameId).notifier)
-            .onPositionChanged(
-              variant: state.game.meta.variant,
-              initialPosition: state.game.initialPosition,
-              currentPosition: state.currentPosition,
-            );
-      }
-    });
-
-    // Initial position evaluation trigger
-    final currentGameState = ref.watch(gameControllerProvider(gameId)).value;
-    if (currentGameState != null && currentGameState.game.playable) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) {
-          ref
-              .read(liveAssistanceProvider(gameId).notifier)
-              .onPositionChanged(
-                variant: currentGameState.game.meta.variant,
-                initialPosition: currentGameState.game.initialPosition,
-                currentPosition: currentGameState.currentPosition,
-              );
-        }
-      });
-    }
-
     try {
       final assistance = ref.watch(liveAssistanceProvider(gameId));
 

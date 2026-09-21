@@ -85,6 +85,8 @@ jobs:
           if [ "$TARGET_ARCH" = "universal" ]; then
             echo "Building Universal APK..."
             flutter build apk --release \
+              --split-debug-info=build/app/outputs/symbols \
+              --obfuscate \
               --dart-define=cronetHttpNoPlay=true \
               --dart-define=LICHESS_HOST=lichess.org \
               --dart-define=LICHESS_WS_HOST=socket.lichess.org \
@@ -93,13 +95,15 @@ jobs:
           else
             echo "Building arm64-v8a Optimized APK..."
             flutter build apk --release \
-              --target-platform=android-arm64 \
+              --split-per-abi \
+              --split-debug-info=build/app/outputs/symbols \
+              --obfuscate \
               -PtargetAbi=arm64-v8a \
               --dart-define=cronetHttpNoPlay=true \
               --dart-define=LICHESS_HOST=lichess.org \
               --dart-define=LICHESS_WS_HOST=socket.lichess.org \
               --dart-define=LICHESS_WS_SECRET=wG1OLhUR3CSXdDybqrtIW227QGrtiM3d
-            cp build/app/outputs/flutter-apk/app-release.apk release-apks/lichess-mobile-arm64-v8a.apk
+            cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release-apks/lichess-mobile-arm64-v8a.apk
           fi
           ls -lh release-apks/
 

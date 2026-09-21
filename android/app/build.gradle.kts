@@ -43,10 +43,11 @@ android {
         versionName = flutter.versionName
         val targetAbi = project.findProperty("targetAbi") as String?
         ndk {
+            abiFilters.clear()
             if (targetAbi != null && targetAbi.isNotEmpty()) {
-                abiFilters += listOf(targetAbi)
+                abiFilters.add(targetAbi)
             } else {
-                abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+                abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64"))
             }
         }
     }
@@ -74,7 +75,7 @@ android {
                 signingConfigs.getByName("debug")
             }
             ndk {
-                debugSymbolLevel = "FULL"
+                debugSymbolLevel = "NONE"
             }
         }
         debug {

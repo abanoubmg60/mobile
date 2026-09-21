@@ -17,6 +17,7 @@ class const LiveMoveSuggestion({
   required final String san,
   required final String evalString,
   required final double winningChances,
+  required final Move move,
 });
 
 @immutable
@@ -92,107 +93,118 @@ final liveAssistanceProvider = NotifierProvider.autoDispose
 
 class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssistanceState> {
   String? _lastFen;
-  Position? _evaluatedPosition;
-  ProviderSubscription<EngineEvaluationState>? _evaluatorSub;
+  ProviderSubscription<EngineEvaluationState>? _evaluatorKeepAlive;
   StreamSubscription<EvalResult>? _streamSub;
   EvaluationContext? _evalContext;
-  LiveAssistanceState _currentState = const LiveAssistanceState();
 
   @override
   LiveAssistanceState build() {
     final enabled = ref.watch(liveAssistanceEnabledProvider);
-    _currentState = _currentState.copyWith(enabled: enabled);
 
     ref.onDispose(() {
       _streamSub?.cancel();
-      _evaluatorSub?.close();
+      _streamSub = null;
+      _evaluatorKeepAlive?.close();
+      _evaluatorKeepAlive = null;
+      if (_evalContext != null) {
+        try {
+          ref.read(positionEvaluatorProvider(_evalContext!).notifier).stop();
+        } catch (_) {}
+      }
     });
 
-    final gameState = ref.watch(gameControllerProvider(gameId)).value;
-    if (enabled && gameState != null && gameState.game.playable) {
-      final currentPosition = gameState.currentPosition;
-      final currentFen = currentPosition.fen;
-
-      if (_lastFen != currentFen) {
-        _lastFen = currentFen;
-        _evaluatedPosition = currentPosition;
-
-        Future.microtask(() {
-          if (ref.mounted) {
-            _startEvaluation(
-              variant: gameState.game.meta.variant,
-              initialPosition: gameState.game.initialPosition,
-              currentPosition: currentPosition,
-            );
-          }
-        });
-      }
+    if (!enabled) {
+      return const LiveAssistanceState(enabled: false);
     }
 
-    return _currentState;
+    final initialGameState = ref.read(gameControllerProvider(gameId)).value;
+    if (initialGameState != null && initialGameState.game.playable) {
+      Future.microtask(() {
+        if (ref.mounted) {
+          _onPositionChanged(
+            variant: initialGameState.game.meta.variant,
+            initialPosition: initialGameState.game.initialPosition,
+            currentPosition: initialGameState.currentPosition,
+          );
+        }
+      });
+    }
+
+    // Listen to game position changes without rebuilding this notifier
+    ref.listen(
+      gameControllerProvider(gameId).select((s) {
+        final st = s.value;
+        if (st == null) return null;
+        return (
+          playable: st.game.playable,
+          variant: st.game.meta.variant,
+          initialPosition: st.game.initialPosition,
+          currentPosition: st.currentPosition,
+        );
+      }),
+      (prev, next) {
+        if (next != null && next.playable) {
+          _onPositionChanged(
+            variant: next.variant,
+            initialPosition: next.initialPosition,
+            currentPosition: next.currentPosition,
+          );
+        }
+      },
+    );
+
+    return const LiveAssistanceState(enabled: true, isComputing: true);
   }
 
   void toggleEnabled() {
     ref.read(liveAssistanceEnabledProvider.notifier).toggle();
   }
 
-  void onPositionChanged({
+  void _onPositionChanged({
     required Variant variant,
     required Position initialPosition,
     required Position currentPosition,
   }) {
-    _startEvaluation(
+    if (!state.enabled || !ref.mounted) return;
+
+    final currentFen = currentPosition.fen;
+    if (_lastFen == currentFen) return;
+    _lastFen = currentFen;
+
+    // Cancel active search and subscription
+    _streamSub?.cancel();
+    _streamSub = null;
+
+    final context = EvaluationContext(
+      id: StringId('live_assist_${gameId.value}'),
       variant: variant,
       initialPosition: initialPosition,
-      currentPosition: currentPosition,
     );
-  }
 
-  void _startEvaluation({
-    required Variant variant,
-    required Position initialPosition,
-    required Position currentPosition,
-  }) {
-    if (!_currentState.enabled || !ref.mounted) return;
+    // Keep positionEvaluatorProvider alive so it doesn't auto-dispose
+    if (_evalContext != context || _evaluatorKeepAlive == null) {
+      _evaluatorKeepAlive?.close();
+      _evalContext = context;
+      _evaluatorKeepAlive = ref.listen(positionEvaluatorProvider(context), (_, _) {});
+    }
+
+    final evaluator = ref.read(positionEvaluatorProvider(context).notifier);
+    evaluator.stop();
+
+    state = state.copyWith(isComputing: true, suggestions: const IListConst([]));
+
+    final work = EvalWork(
+      id: StringId('live_assist_${gameId.value}'),
+      variant: variant,
+      threads: 1,
+      searchTime: const Duration(seconds: 3),
+      multiPv: 3,
+      threatMode: false,
+      initialPosition: currentPosition,
+      steps: const IListConst([]),
+    );
 
     try {
-      final context = EvaluationContext(
-        id: StringId('live_assist_${gameId.value}'),
-        variant: variant,
-        initialPosition: initialPosition,
-      );
-
-      _evaluatedPosition = currentPosition;
-
-      // Keep positionEvaluatorProvider alive via subscription
-      if (_evalContext != context || _evaluatorSub == null) {
-        _evaluatorSub?.close();
-        _evalContext = context;
-        _evaluatorSub = ref.listen(positionEvaluatorProvider(context), (prev, next) {
-          final eval = next.eval;
-          if (eval != null && _evaluatedPosition != null) {
-            _handleEvalResult(_evaluatedPosition!, eval);
-          }
-        });
-      }
-
-      final evaluator = ref.read(positionEvaluatorProvider(context).notifier);
-
-      final work = EvalWork(
-        id: StringId('live_assist_${gameId.value}'),
-        variant: variant,
-        threads: 1,
-        searchTime: const Duration(seconds: 3),
-        multiPv: 3,
-        threatMode: false,
-        initialPosition: currentPosition,
-        steps: const IListConst([]),
-      );
-
-      _streamSub?.cancel();
-      _currentState = _currentState.copyWith(isComputing: true);
-      state = _currentState;
-
       _streamSub = evaluator
           .evaluate(work)
           ?.listen(
@@ -201,18 +213,22 @@ class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssis
               _handleEvalResult(currentPosition, eval);
             },
             onError: (Object _) {
-              _currentState = _currentState.copyWith(isComputing: false);
-              state = _currentState;
+              if (ref.mounted && _lastFen == currentFen) {
+                state = state.copyWith(isComputing: false);
+              }
             },
           );
     } catch (_) {
-      _currentState = _currentState.copyWith(isComputing: false);
-      state = _currentState;
+      if (ref.mounted && _lastFen == currentFen) {
+        state = state.copyWith(isComputing: false);
+      }
     }
   }
 
   void _handleEvalResult(Position position, LocalEval eval) {
     if (!ref.mounted) return;
+    if (_lastFen != position.fen) return;
+
     try {
       final suggestions = <LiveMoveSuggestion>[];
       for (final pv in eval.pvs.take(3)) {
@@ -226,24 +242,25 @@ class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssis
                 san: san,
                 evalString: pv.evalString,
                 winningChances: pv.winningChances(Side.white),
+                move: move,
               ),
             );
           }
         }
       }
 
-      if (suggestions.isNotEmpty) {
-        _currentState = _currentState.copyWith(
+      if (suggestions.isNotEmpty && _lastFen == position.fen) {
+        state = state.copyWith(
           isComputing: false,
           whiteWinningChances: eval.winningChances(Side.white),
           evalString: eval.evalString,
           suggestions: suggestions.toIList(),
         );
-        state = _currentState;
       }
     } catch (_) {
-      _currentState = _currentState.copyWith(isComputing: false);
-      state = _currentState;
+      if (ref.mounted && _lastFen == position.fen) {
+        state = state.copyWith(isComputing: false);
+      }
     }
   }
 }

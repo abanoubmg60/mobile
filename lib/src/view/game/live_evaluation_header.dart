@@ -2,8 +2,8 @@ import 'package:dartchess/dartchess.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lichess_mobile/src/model/common/id.dart';
+import 'package:lichess_mobile/src/model/game/game_controller.dart';
 import 'package:lichess_mobile/src/model/game/live_assistance_controller.dart';
-import 'package:lichess_mobile/src/styles/styles.dart';
 
 class const LiveEvaluationHeader({
   required final GameFullId gameId,
@@ -19,6 +19,10 @@ class const LiveEvaluationHeader({
       if (!assistance.enabled) {
         return const SizedBox.shrink();
       }
+
+      final isMyTurn = ref.watch(
+        gameControllerProvider(gameId).select((s) => s.value?.game.isMyTurn ?? false),
+      );
 
       final theme = Theme.of(context);
       final isDark = theme.brightness == Brightness.dark;
@@ -47,19 +51,37 @@ class const LiveEvaluationHeader({
           children: [
             // 1. Move Suggestions Row
             SizedBox(
-              height: 28.0,
+              height: 30.0,
               child: Row(
                 children: [
                   Expanded(
                     child: suggestions.isEmpty
                         ? Align(
                             alignment: .centerLeft,
-                            child: Text(
-                              assistance.isComputing ? 'Calculating best moves...' : '',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: textShade(context, 0.6),
-                                fontStyle: FontStyle.italic,
-                              ),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 12.0,
+                                  height: 12.0,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                    color: isDark ? Colors.white54 : Colors.black45,
+                                  ),
+                                ),
+                                const SizedBox(width: 8.0),
+                                Text(
+                                  assistance.isComputing
+                                      ? (isMyTurn
+                                            ? 'Calculating your best moves...'
+                                            : 'Analyzing position...')
+                                      : 'Waiting for engine...',
+                                  style: TextStyle(
+                                    fontSize: 12.0,
+                                    color: isDark ? Colors.white70 : Colors.black87,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
                             ),
                           )
                         : ListView.separated(
@@ -72,76 +94,144 @@ class const LiveEvaluationHeader({
                               final isBest = index == 0;
 
                               final isWhiteAdvantage = !suggestion.evalString.startsWith('-');
-                              final scoreColor = isWhiteAdvantage
-                                  ? (isDark ? Colors.greenAccent.shade200 : Colors.green.shade800)
-                                  : (isDark
-                                        ? Colors.orangeAccent.shade200
-                                        : Colors.deepOrange.shade800);
+                              final isZero =
+                                  suggestion.evalString == '0.0' || suggestion.evalString == '-0.0';
 
-                              return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
-                                decoration: BoxDecoration(
-                                  color: isBest
-                                      ? (isDark
-                                            ? theme.colorScheme.primaryContainer.withValues(
-                                                alpha: 0.4,
-                                              )
-                                            : theme.colorScheme.primaryContainer.withValues(
-                                                alpha: 0.6,
-                                              ))
-                                      : (isDark
-                                            ? Colors.white.withValues(alpha: 0.08)
-                                            : Colors.black.withValues(alpha: 0.05)),
+                              final Color scoreBgColor;
+                              final Color scoreTextColor;
+                              if (isZero) {
+                                scoreBgColor = isDark
+                                    ? const Color(0xFF383838)
+                                    : const Color(0xFFE0E0E0);
+                                scoreTextColor = isDark ? Colors.white70 : Colors.black87;
+                              } else if (isWhiteAdvantage) {
+                                scoreBgColor = isDark
+                                    ? const Color(0xFF1B3820)
+                                    : const Color(0xFFE0F2E9);
+                                scoreTextColor = isDark
+                                    ? const Color(0xFF66BB6A)
+                                    : const Color(0xFF2E7D32);
+                              } else {
+                                scoreBgColor = isDark
+                                    ? const Color(0xFF3D1F18)
+                                    : const Color(0xFFFFEBE5);
+                                scoreTextColor = isDark
+                                    ? const Color(0xFFFF7043)
+                                    : const Color(0xFFD84315);
+                              }
+
+                              final chipBgColor = isDark
+                                  ? (isBest ? const Color(0xFF36332E) : const Color(0xFF262421))
+                                  : (isBest ? const Color(0xFFEAE8E3) : const Color(0xFFF5F4F0));
+
+                              final chipBorderColor = isBest
+                                  ? const Color(0xFF75993B)
+                                  : (isDark ? const Color(0xFF484540) : const Color(0xFFD0CFCB));
+
+                              return Material(
+                                color: Colors.transparent,
+                                child: InkWell(
                                   borderRadius: BorderRadius.circular(6.0),
-                                  border: isBest
-                                      ? Border.all(
-                                          color: theme.colorScheme.primary.withValues(alpha: 0.5),
-                                          width: 1.0,
-                                        )
+                                  onTap: isMyTurn
+                                      ? () {
+                                          try {
+                                            ref
+                                                .read(gameControllerProvider(gameId).notifier)
+                                                .userMove(suggestion.move);
+                                          } catch (_) {}
+                                        }
                                       : null,
-                                ),
-                                child: Row(
-                                  mainAxisSize: .min,
-                                  children: [
-                                    Text(
-                                      '${index + 1}. ',
-                                      style: TextStyle(
-                                        fontSize: 11.0,
-                                        fontWeight: FontWeight.bold,
-                                        color: textShade(context, 0.5),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8.0,
+                                      vertical: 3.0,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: chipBgColor,
+                                      borderRadius: BorderRadius.circular(6.0),
+                                      border: Border.all(
+                                        color: chipBorderColor,
+                                        width: isBest ? 1.5 : 1.0,
                                       ),
                                     ),
-                                    Text(
-                                      suggestion.san,
-                                      style: TextStyle(
-                                        fontSize: 13.0,
-                                        fontWeight: FontWeight.w700,
-                                        color: isBest
-                                            ? theme.colorScheme.primary
-                                            : theme.textTheme.bodyMedium?.color,
-                                      ),
+                                    child: Row(
+                                      mainAxisSize: .min,
+                                      children: [
+                                        Text(
+                                          '${index + 1}. ',
+                                          style: TextStyle(
+                                            fontSize: 11.0,
+                                            fontWeight: FontWeight.bold,
+                                            color: isDark
+                                                ? const Color(0xFFA09E99)
+                                                : const Color(0xFF6E6C68),
+                                          ),
+                                        ),
+                                        Text(
+                                          suggestion.san,
+                                          style: TextStyle(
+                                            fontSize: 13.0,
+                                            fontWeight: FontWeight.bold,
+                                            color: isDark ? Colors.white : const Color(0xFF181715),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 5.0),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4.0,
+                                            vertical: 1.0,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: scoreBgColor,
+                                            borderRadius: BorderRadius.circular(3.0),
+                                          ),
+                                          child: Text(
+                                            suggestion.evalString,
+                                            style: TextStyle(
+                                              fontSize: 11.0,
+                                              fontWeight: FontWeight.w700,
+                                              color: scoreTextColor,
+                                            ),
+                                          ),
+                                        ),
+                                        if (isMyTurn && isBest) ...[
+                                          const SizedBox(width: 4.0),
+                                          const Icon(
+                                            Icons.play_arrow_rounded,
+                                            size: 13.0,
+                                            color: Color(0xFF75993B),
+                                          ),
+                                        ],
+                                      ],
                                     ),
-                                    const SizedBox(width: 4.0),
-                                    Text(
-                                      suggestion.evalString,
-                                      style: TextStyle(
-                                        fontSize: 11.0,
-                                        fontWeight: FontWeight.w600,
-                                        color: scoreColor,
-                                      ),
-                                    ),
-                                  ],
+                                  ),
                                 ),
                               );
                             },
                           ),
                   ),
+                  if (!isMyTurn && suggestions.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4.0),
+                      child: Text(
+                        '(Opponent)',
+                        style: TextStyle(
+                          fontSize: 10.0,
+                          fontStyle: FontStyle.italic,
+                          color: isDark ? Colors.white54 : Colors.black45,
+                        ),
+                      ),
+                    ),
                   // Quick toggle icon
                   GestureDetector(
                     onTap: () => ref.read(liveAssistanceProvider(gameId).notifier).toggleEnabled(),
                     child: Padding(
                       padding: const EdgeInsets.only(left: 6.0),
-                      child: Icon(Icons.visibility, size: 16.0, color: textShade(context, 0.5)),
+                      child: Icon(
+                        Icons.visibility,
+                        size: 16.0,
+                        color: isDark ? Colors.white54 : Colors.black45,
+                      ),
                     ),
                   ),
                 ],

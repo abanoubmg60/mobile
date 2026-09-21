@@ -77,26 +77,20 @@ jobs:
           KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
           KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
 
-      - name: Build Universal Release APK
+      - name: Build Release APK
         run: flutter build apk --release
 
-      - name: Build Split per ABI Release APKs
-        run: flutter build apk --release --split-per-abi
-
-      - name: Organize & Rename APKs
+      - name: Organize & Rename APK
         run: |
           mkdir -p release-apks
-          cp build/app/outputs/flutter-apk/app-release.apk release-apks/lichess-mobile-universal.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release-apks/lichess-mobile-arm64-v8a.apk
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release-apks/lichess-mobile-armeabi-v7a.apk
-          cp build/app/outputs/flutter-apk/app-x86_64-release.apk release-apks/lichess-mobile-x86_64.apk
+          cp build/app/outputs/flutter-apk/app-release.apk release-apks/lichess-mobile.apk
           ls -lh release-apks/
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: lichess-mobile-apks
-          path: release-apks/*
+          name: lichess-mobile-apk
+          path: release-apks/lichess-mobile.apk
           retention-days: 14
 
       - name: Determine Release Tag
@@ -119,8 +113,5 @@ jobs:
           draft: ${{ github.event.inputs.draft || false }}
           prerelease: ${{ github.event.inputs.prerelease || false }}
           generate_release_notes: true
-          files: |
-            release-apks/lichess-mobile-universal.apk
-            release-apks/lichess-mobile-arm64-v8a.apk
-            release-apks/lichess-mobile-armeabi-v7a.apk
-            release-apks/lichess-mobile-x86_64.apk
+          files: release-apks/lichess-mobile.apk
+

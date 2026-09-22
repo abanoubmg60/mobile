@@ -27,6 +27,7 @@ class const LiveAssistanceState({
   final double? whiteWinningChances = 0.0,
   final String? evalString,
   final IList<LiveMoveSuggestion> suggestions = const IListConst([]),
+  final IMap<Move, Move> anticipatedReplies = const IMapConst({}),
 }) {
   LiveAssistanceState copyWith({
     bool? enabled,
@@ -34,6 +35,7 @@ class const LiveAssistanceState({
     double? whiteWinningChances,
     String? evalString,
     IList<LiveMoveSuggestion>? suggestions,
+    IMap<Move, Move>? anticipatedReplies,
   }) {
     return LiveAssistanceState(
       enabled: enabled ?? this.enabled,
@@ -41,6 +43,7 @@ class const LiveAssistanceState({
       whiteWinningChances: whiteWinningChances ?? this.whiteWinningChances,
       evalString: evalString ?? this.evalString,
       suggestions: suggestions ?? this.suggestions,
+      anticipatedReplies: anticipatedReplies ?? this.anticipatedReplies,
     );
   }
 }
@@ -262,12 +265,26 @@ class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssis
         }
       }
 
+      final anticipated = <Move, Move>{};
+      for (final pv in eval.pvs) {
+        if (pv.moves.length >= 2) {
+          final oppMove = Move.parse(pv.moves[0]);
+          final myMove = Move.parse(pv.moves[1]);
+          if (oppMove != null && myMove != null) {
+            anticipated[oppMove] = myMove;
+          }
+        }
+      }
+
       if (suggestions.isNotEmpty && _lastFen == position.fen) {
         state = state.copyWith(
           isComputing: false,
           whiteWinningChances: eval.winningChances(Side.white),
           evalString: eval.evalString,
           suggestions: suggestions.toIList(),
+          anticipatedReplies: anticipated.isNotEmpty
+              ? anticipated.toIMap()
+              : state.anticipatedReplies,
         );
 
         if (ref.read(autoRecaptureEnabledProvider)) {

@@ -362,19 +362,35 @@ class _PlayableGameBoardState() extends ConsumerState<_PlayableGameBoard> {
 
       final prevPos = state.stepCursor > 0 ? state.game.positionAt(state.stepCursor - 1) : null;
       final opponentLastMove = state.game.moveAt(state.stepCursor);
-      final lastStep = state.game.steps.lastOrNull;
-      final isOpponentCapture = lastStep?.sanMove?.isCapture == true;
+      final currentStep = state.stepCursor < state.game.steps.length
+          ? state.game.steps[state.stepCursor]
+          : state.game.steps.lastOrNull;
+      final isOpponentCapture =
+          currentStep?.sanMove?.isCapture == true ||
+          (prevPos != null &&
+              opponentLastMove != null &&
+              prevPos.board.pieceAt(opponentLastMove.to) != null &&
+              prevPos.board.pieceAt(opponentLastMove.to)!.color == mySide);
 
-      // Auto-recapture check: if enabled and engine already confirmed best move is a recapture
+      // Auto-recapture check: if enabled and opponent made a capture of our piece,
+      // execute best anticipated or tactical recapture instantly (like a premove)
       final autoRecapture = ref.read(autoRecaptureEnabledProvider);
-      if (autoRecapture && isOpponentCapture && mySide != null) {
+      if (autoRecapture && isOpponentCapture && mySide != null && opponentLastMove != null) {
         final assistState = ref.read(liveAssistanceProvider(widget.gameId));
-        final bestSuggestion = assistState.suggestions.firstOrNull;
-        if (bestSuggestion != null &&
-            opponentLastMove != null &&
-            bestSuggestion.move.to == opponentLastMove.to) {
+        final anticipated = assistState.anticipatedReplies[opponentLastMove];
+
+        final bestRecapture = findBestRecapture(
+          currentPosition: state.currentPosition,
+          prevPosition: prevPos,
+          opponentCapture: opponentLastMove,
+          mySide: mySide,
+          timeLeft: myTime,
+          anticipatedReply: anticipated,
+        );
+
+        if (bestRecapture != null) {
           _controller.clearPremoves();
-          scheduleMicrotask(() => ref.read(_ctrlProvider.notifier).userMove(bestSuggestion.move));
+          scheduleMicrotask(() => ref.read(_ctrlProvider.notifier).userMove(bestRecapture));
           return;
         }
       }

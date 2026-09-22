@@ -1,5 +1,6 @@
 import 'package:dartchess/dartchess.dart';
 import 'package:fast_immutable_collections/fast_immutable_collections.dart';
+import 'package:lichess_mobile/src/model/common/chess.dart';
 
 const IMap<Role, int> pieceRoleValues = IMapConst({
   Role.pawn: 1,
@@ -47,32 +48,31 @@ bool isPremoveLosing({
       // Are there legal recapture moves on that square?
       final canRecapture = currentPosition.legalMoves.values.any((dests) => dests.has(opponentTo));
       if (canRecapture) {
-        // If our premove is a recapture on that square, it's the intended reply!
-        if (premove.to == opponentTo) {
-          return false;
-        }
-
-        // Check if premove delivers checkmate
-        try {
-          final posAfterPremove = currentPosition.playUnchecked(premove);
-          if (posAfterPremove.isCheckmate) {
-            return false;
-          }
-        } catch (_) {}
-
-        // Check if premove counter-captures equal or higher value piece elsewhere
-        if (premove is NormalMove) {
-          final targetPiece = currentPosition.board.pieceAt(premove.to);
-          if (targetPiece != null && targetPiece.color == mySide.opposite) {
-            final targetValue = pieceRoleValues[targetPiece.role] ?? 0;
-            if (targetValue >= capturedValue) {
+        // If our premove is a recapture on that square, it passes section 2
+        // and continues to section 3 to ensure the recapturing piece itself doesn't hang.
+        if (premove.to != opponentTo) {
+          // Check if premove delivers checkmate
+          try {
+            final posAfterPremove = currentPosition.playUnchecked(premove);
+            if (posAfterPremove.isCheckmate) {
               return false;
             }
-          }
-        }
+          } catch (_) {}
 
-        // Premove plays an unrelated move without recapturing the lost piece -> BLUNDER!
-        return true;
+          // Check if premove counter-captures equal or higher value piece elsewhere
+          if (premove is NormalMove) {
+            final targetPiece = currentPosition.board.pieceAt(premove.to);
+            if (targetPiece != null && targetPiece.color == mySide.opposite) {
+              final targetValue = pieceRoleValues[targetPiece.role] ?? 0;
+              if (targetValue >= capturedValue) {
+                return false;
+              }
+            }
+          }
+
+          // Premove plays an unrelated move without recapturing the lost piece -> BLUNDER!
+          return true;
+        }
       }
     }
   }
@@ -115,6 +115,107 @@ bool isPremoveLosing({
   }
 
   return false;
+}
+
+/// Finds the best legal recapture move in [currentPosition] following [opponentCapture].
+///
+/// If [anticipatedReply] is provided (e.g. from the engine's principal variation) and is a legal
+/// recapture, it is preferred. Otherwise, this evaluates all legal moves landing on
+/// [opponentCapture.to], sorting them by piece value ascending (Pawn < Knight/Bishop < Rook < Queen < King)
+/// and returns the best non-losing recapture.
+Move? findBestRecapture({
+  required Position currentPosition,
+  required Move opponentCapture,
+  required Side mySide,
+  required Duration? timeLeft,
+  Position? prevPosition,
+  Move? anticipatedReply,
+}) {
+  final targetSquare = opponentCapture.to;
+
+  // 1. If an anticipated engine reply was pre-computed and is a legal recapture, verify and use it
+  if (anticipatedReply != null && anticipatedReply.to == targetSquare) {
+    if (currentPosition.isLegal(anticipatedReply)) {
+      final losing = isPremoveLosing(
+        currentPosition: currentPosition,
+        prevPosition: prevPosition,
+        opponentLastMove: opponentCapture,
+        isOpponentCapture: true,
+        premove: anticipatedReply,
+        mySide: mySide,
+        timeLeft: timeLeft,
+      );
+      if (!losing) {
+        return anticipatedReply;
+      }
+    }
+  }
+
+  // 2. Find all legal moves landing on targetSquare
+  final candidates = <NormalMove>[];
+
+  for (final entry in currentPosition.legalMoves.entries) {
+    final from = entry.key;
+    final dests = entry.value;
+    if (dests.has(targetSquare)) {
+      final move = NormalMove(from: from, to: targetSquare);
+      if (isPromotionPawnMove(currentPosition, move)) {
+        candidates.add(NormalMove(from: from, to: targetSquare, promotion: Role.queen));
+      } else {
+        candidates.add(move);
+      }
+    }
+  }
+
+  if (candidates.isEmpty) return null;
+
+  // 3. Sort candidates by piece value ascending:
+  // Pawn (1) < Knight (3) == Bishop (3) < Rook (5) < Queen (9) < King (100)
+  int recaptureRoleScore(Role role) => switch (role) {
+    Role.pawn => 1,
+    Role.knight => 3,
+    Role.bishop => 3,
+    Role.rook => 5,
+    Role.queen => 9,
+    Role.king => 100,
+  };
+
+  candidates.sort((a, b) {
+    final roleA = currentPosition.board.roleAt(a.from) ?? Role.queen;
+    final roleB = currentPosition.board.roleAt(b.from) ?? Role.queen;
+    final scoreDiff = recaptureRoleScore(roleA).compareTo(recaptureRoleScore(roleB));
+    if (scoreDiff != 0) return scoreDiff;
+    // Tie-breaker for pawns: prefer capturing towards the center files (d and e, files 3 and 4)
+    if (roleA == Role.pawn) {
+      final distA = (a.from.file - 3.5).abs();
+      final distB = (b.from.file - 3.5).abs();
+      return distA.compareTo(distB);
+    }
+    return 0;
+  });
+
+  // 4. Return the first non-losing candidate
+  for (final candidate in candidates) {
+    final losing = isPremoveLosing(
+      currentPosition: currentPosition,
+      prevPosition: prevPosition,
+      opponentLastMove: opponentCapture,
+      isOpponentCapture: true,
+      premove: candidate,
+      mySide: mySide,
+      timeLeft: timeLeft,
+    );
+    if (!losing) {
+      return candidate;
+    }
+  }
+
+  // 5. If under 5 seconds, play the first legal candidate anyway to avoid flagging
+  if (timeLeft != null && timeLeft < const Duration(seconds: 5)) {
+    return candidates.firstOrNull;
+  }
+
+  return null;
 }
 
 /// Checks whether [candidateMove] recaptures the piece on [opponentLastMove]'s destination.

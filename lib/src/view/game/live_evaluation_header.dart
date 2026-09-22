@@ -15,17 +15,56 @@ class const LiveEvaluationHeader({
   Widget build(BuildContext context, WidgetRef ref) {
     try {
       final assistance = ref.watch(liveAssistanceProvider(gameId));
+      final autoRecapture = ref.watch(autoRecaptureEnabledProvider);
+
+      final theme = Theme.of(context);
+      final isDark = theme.brightness == Brightness.dark;
 
       if (!assistance.enabled) {
-        return const SizedBox.shrink();
+        return Container(
+          width: width,
+          margin: const EdgeInsets.only(bottom: 2.0),
+          alignment: Alignment.centerRight,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12.0),
+              onTap: () => ref.read(liveAssistanceProvider(gameId).notifier).toggleEnabled(),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 3.0),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF262421) : const Color(0xFFEFEFEF),
+                  borderRadius: BorderRadius.circular(12.0),
+                  border: Border.all(color: isDark ? Colors.white24 : Colors.black12, width: 1.0),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.visibility_off,
+                      size: 13.0,
+                      color: isDark ? Colors.white70 : Colors.black54,
+                    ),
+                    const SizedBox(width: 4.0),
+                    Text(
+                      'Show Eval',
+                      style: TextStyle(
+                        fontSize: 11.0,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
       }
 
       final isMyTurn = ref.watch(
         gameControllerProvider(gameId).select((s) => s.value?.game.isMyTurn ?? false),
       );
-
-      final theme = Theme.of(context);
-      final isDark = theme.brightness == Brightness.dark;
 
       final whiteChances = assistance.whiteWinningChances ?? 0.0;
       // Normalized winning chance from 0.0 (all black) to 1.0 (all white)
@@ -222,6 +261,54 @@ class const LiveEvaluationHeader({
                         ),
                       ),
                     ),
+                  // Auto-Recapture toggle button
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(6.0),
+                      onTap: () => ref.read(autoRecaptureEnabledProvider.notifier).toggle(),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5.0, vertical: 2.0),
+                        margin: const EdgeInsets.only(left: 4.0),
+                        decoration: BoxDecoration(
+                          color: autoRecapture
+                              ? (isDark ? const Color(0xFF1B3820) : const Color(0xFFE0F2E9))
+                              : (isDark ? const Color(0xFF262421) : const Color(0xFFEBEBEB)),
+                          borderRadius: BorderRadius.circular(6.0),
+                          border: Border.all(
+                            color: autoRecapture
+                                ? const Color(0xFF75993B)
+                                : (isDark ? Colors.white24 : Colors.black12),
+                            width: autoRecapture ? 1.5 : 1.0,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.autorenew_rounded,
+                              size: 13.0,
+                              color: autoRecapture
+                                  ? const Color(0xFF75993B)
+                                  : (isDark ? Colors.white54 : Colors.black45),
+                            ),
+                            const SizedBox(width: 2.0),
+                            Text(
+                              'Auto-Recap',
+                              style: TextStyle(
+                                fontSize: 10.0,
+                                fontWeight: FontWeight.bold,
+                                color: autoRecapture
+                                    ? (isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32))
+                                    : (isDark ? Colors.white60 : Colors.black54),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
                   // Quick toggle icon
                   GestureDetector(
                     onTap: () => ref.read(liveAssistanceProvider(gameId).notifier).toggleEnabled(),

@@ -14,7 +14,9 @@ import 'package:lichess_mobile/src/model/common/speed.dart';
 import 'package:lichess_mobile/src/model/game/game_board_params.dart';
 import 'package:lichess_mobile/src/model/game/game_controller.dart';
 import 'package:lichess_mobile/src/model/game/game_preferences.dart';
+import 'package:lichess_mobile/src/model/game/live_assistance_controller.dart';
 import 'package:lichess_mobile/src/model/game/playable_game.dart';
+import 'package:lichess_mobile/src/model/game/premove_guard.dart';
 import 'package:lichess_mobile/src/model/settings/board_preferences.dart';
 import 'package:lichess_mobile/src/model/user/user_repository_providers.dart';
 import 'package:lichess_mobile/src/styles/lichess_icons.dart';
@@ -353,10 +355,48 @@ class _PlayableGameBoardState() extends ConsumerState<_PlayableGameBoard> {
     // move, and attempting the premove then would validate it against a
     // position where it isn't our turn and wrongly discard it.
     if (state.currentPosition.turn == state.game.youAre) {
+      final mySide = state.game.youAre;
+      final Duration? myTime = state.liveClock != null
+          ? (mySide == Side.white ? state.liveClock!.white.value : state.liveClock!.black.value)
+          : (mySide != null ? state.game.clockOf(mySide) : null);
+
+      final prevPos = state.stepCursor > 0 ? state.game.positionAt(state.stepCursor - 1) : null;
+      final opponentLastMove = state.game.moveAt(state.stepCursor);
+      final lastStep = state.game.steps.lastOrNull;
+      final isOpponentCapture = lastStep?.sanMove?.isCapture == true;
+
+      // Auto-recapture check: if enabled and engine already confirmed best move is a recapture
+      final autoRecapture = ref.read(autoRecaptureEnabledProvider);
+      if (autoRecapture && isOpponentCapture && mySide != null) {
+        final assistState = ref.read(liveAssistanceProvider(widget.gameId));
+        final bestSuggestion = assistState.suggestions.firstOrNull;
+        if (bestSuggestion != null &&
+            opponentLastMove != null &&
+            bestSuggestion.move.to == opponentLastMove.to) {
+          _controller.clearPremoves();
+          scheduleMicrotask(() => ref.read(_ctrlProvider.notifier).userMove(bestSuggestion.move));
+          return;
+        }
+      }
+
       tryExecutePremove(
         _controller,
         state.currentPosition,
         (move) => ref.read(_ctrlProvider.notifier).userMove(move, isPremove: true),
+        isMoveAllowed: mySide == null
+            ? null
+            : (premove) {
+                final isLosing = isPremoveLosing(
+                  currentPosition: state.currentPosition,
+                  prevPosition: prevPos,
+                  opponentLastMove: opponentLastMove,
+                  isOpponentCapture: isOpponentCapture,
+                  premove: premove,
+                  mySide: mySide,
+                  timeLeft: myTime,
+                );
+                return !isLosing;
+              },
       );
     }
   }

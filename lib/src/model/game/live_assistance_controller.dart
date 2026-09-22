@@ -58,6 +58,19 @@ class LiveAssistanceEnabledNotifier() extends Notifier<bool> {
   void toggle() => state = !state;
 }
 
+/// Global toggle for auto-recapture mode.
+final autoRecaptureEnabledProvider = NotifierProvider<AutoRecaptureEnabledNotifier, bool>(
+  AutoRecaptureEnabledNotifier.new,
+  name: 'AutoRecaptureEnabledProvider',
+);
+
+class AutoRecaptureEnabledNotifier() extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void toggle() => state = !state;
+}
+
 /// Formats a SAN string with clean unicode piece symbols.
 String formatSanWithPieceEmoji(Position position, Move move) {
   try {
@@ -256,11 +269,34 @@ class LiveAssistanceNotifier(final GameFullId gameId) extends Notifier<LiveAssis
           evalString: eval.evalString,
           suggestions: suggestions.toIList(),
         );
+
+        if (ref.read(autoRecaptureEnabledProvider)) {
+          _checkAndTriggerAutoRecapture(suggestions.first.move);
+        }
       }
     } catch (_) {
       if (ref.mounted && _lastFen == position.fen) {
         state = state.copyWith(isComputing: false);
       }
     }
+  }
+
+  void _checkAndTriggerAutoRecapture(Move bestMove) {
+    try {
+      final gameState = ref.read(gameControllerProvider(gameId)).value;
+      if (gameState == null || !gameState.game.playable || !gameState.game.isMyTurn) {
+        return;
+      }
+
+      final lastMove = gameState.game.moveAt(gameState.stepCursor);
+      final lastStep = gameState.game.steps.lastOrNull;
+      if (lastMove == null || lastStep == null || lastStep.sanMove?.isCapture != true) {
+        return;
+      }
+
+      if (bestMove.to == lastMove.to) {
+        ref.read(gameControllerProvider(gameId).notifier).userMove(bestMove);
+      }
+    } catch (_) {}
   }
 }
